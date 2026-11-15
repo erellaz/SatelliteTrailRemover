@@ -1,6 +1,6 @@
 # SatelliteTrailRemover for PixInsight
 
-A PixInsight script (PJSR) that removes satellite trails from **registered sub-exposures** by comparing each sub with a reference stack. That referenced stack should be computed with a high rejection clipping (eg: Windsorized Sigma Clipping with 2.5 sigma, data dependant), so it is clean, with no satellite trails. Then the script cleans the trails out of each afected lights, in a corridor along each trail, performing adaptive subtraction so the underlying data is not affected. Then you can integrate those cleaned lights again, but with no (or a very gentle) pixel rejection and keep the faint signal without trails showing.
+A PixInsight script (PJSR) that removes satellite trails from **registered sub-exposures** by comparing each sub with a reference stack. That referenced stack should be computed with a high rejection clipping (eg: Windsorized Sigma Clipping with 2.5 sigma, data dependant), so it is clean, with no satellite trails. Then the script cleans the trails out of each affected lights, in a corridor along each trail, performing adaptive subtraction so the underlying data is not affected. Then you can integrate those cleaned lights again, but with no (or a very gentle) pixel rejection and keep the faint signal without trails showing.
 
 Version 2.9 · Author: Erellaz · License: MIT
 
