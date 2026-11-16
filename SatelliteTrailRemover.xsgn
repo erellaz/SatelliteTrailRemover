@@ -4,9 +4,9 @@ PixInsight XML Code Signature Format - XSGN version 1.0
 Created with PixInsight software - https://pixinsight.com/
 -->
 <xsgn version="1.0" xmlns="http://www.pixinsight.com/xsgn" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.pixinsight.com/xsgn http://pixinsight.com/xsgn/xsgn-1.0.xsd">
-   <CreationTime>2026-11-15T18:05:18.887Z</CreationTime>
+   <CreationTime>2026-11-16T19:28:18.036Z</CreationTime>
    <Signature version="1.0" scriptId="SatelliteTrailRemover" developerId="BlackRig">
-      <Timestamp>2026-11-15T18:05:18.887Z</Timestamp>
-      <CodeSignature encoding="Base64">92xAkxDTOyLuxRv8vRi38KMM048W4g7XGYU7w1UpwwFjR379S6a/JR5fVR1aorSv/z6egnf5lVC9iKXzLVPmAA==</CodeSignature>
+      <Timestamp>2026-11-16T19:28:18.035Z</Timestamp>
+      <CodeSignature encoding="Base64">FLEuRS/Ha7GQ7mAI4uSUjYqUbGynlzI/OISMteR7TRNHwg1Hr6TL5EOdBus+5jxYHEaHG3kHucbkAKQ8Jru3Ag==</CodeSignature>
    </Signature>
 </xsgn>
