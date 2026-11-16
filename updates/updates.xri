@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xri version="1.0">
+   <description><p>BlackRig scripts for PixInsight, by Erellaz.</p></description>
+   <platform os="all" arch="noarch" version="1.9.0:2.0.0">
+      <package fileName="SatelliteTrailRemover-2.9-20261116.zip" sha1="854150a223811ea1a5f1282ee8cbf6f5131eb6bc" type="script" releaseDate="20261116">
+         <title>SatelliteTrailRemover</title>
+         <description><p>SatelliteTrailRemover 2.9 and its WBPP step 1.3, by Erellaz (MIT license).</p><p>Removes satellite trails from registered light frames by comparing each frame with a trail-free stack of the same frames and subtracting only the trail. Runs on open frames, in batch, or as a step inside WeightedBatchPreprocessing.</p><p>After installing: Script &gt; BlackRig &gt; SatelliteTrailRemover. For WBPP, select src/scripts/BlackRig/SatelliteTrailRemover/SatelliteTrailRemover_WBPP.js in the PixInsight installation folder as WBPP's pipeline builder (Pipeline tab).</p><p>Documentation: SatelliteTrailRemover_quick_start.pdf in the same folder.</p></description>
+      </package>
+   </platform>
+</xri>
