@@ -7,8 +7,8 @@ The package contains two scripts that work together:
 
 | File | What it is |
 |---|---|
-| `SatelliteTrailRemover.js` (2.9) | The standalone script. You use it to test on a few frames and to set the parameters. |
-| `SatelliteTrailRemover_WBPP.js` (1.3) | The WBPP step. It cleans every registered light frame during a WBPP run, with the parameters saved by the standalone script. |
+| `SatelliteTrailRemover.js` (3.0) | The standalone script. You use it to test on a few frames and to set the parameters. |
+| `SatelliteTrailRemover_WBPP.js` (1.4) | The WBPP step. It cleans every registered light frame during a WBPP run, with the parameters saved by the standalone script. |
 
 Use the two versions together, as shipped.
 
@@ -42,6 +42,9 @@ Start with a handful of frames that show trails, to see what the script does and
 7. Adjust if needed. The main setting is **Line threshold (z)** (default 15):
    - lower it if a faint trail is missed;
    - raise it if frames without a visible trail get modified.
+
+   **Follow faint trail wings** (default on) widens each trail's corridor until its faint glow drops to the noise, up
+   to **Max wing width** (default 120 px). Leave it on; turn it off only to compare with version 2.9.
 8. Close the dialog with **OK** or **Cancel**. Both save your parameters, and the WBPP step will use them.
 
 The test frames you opened were modified in memory only. Close them without saving.
@@ -106,6 +109,7 @@ WBPP's cache keeps the step's results, so a rerun skips what is already done.
 | Parameters in the standalone script | All frames are cleaned again. |
 | `STRW_REF_*` lines | The reference and all frames are redone. |
 | New or re-registered frames | Only those frames, plus the group's reference. |
+| A new version of the scripts | All frames are cleaned again (the results change). |
 
 **Purge cache** in WBPP clears everything.
 
@@ -119,7 +123,8 @@ WBPP's cache keeps the step's results, so a rerun skips what is already done.
 - **Fast integration groups** are not processed.
 - **Older WBPP output folders:** don't use the standalone script's *WBPP mode* (cleaning `registered/` in place, with
   `.sat` originals) on a folder you process with the WBPP step. Run its **Restore originals** first.
-- **Very faint or very short trails** can stay below the detection threshold.
+- **Very faint or very short trails** can stay below the detection threshold (on a test set: full-length trails
+  below about 0.1σ per pixel, or shorter than about 2000 px). Such faint trails mostly average out in the stack.
 
 Tested with PixInsight 1.9.6 and WBPP 3.2.0 on Windows. Details: `README_WBPP.md` (WBPP step), `README_standalone.md` (standalone script) and
 `SatelliteTrailRemover_how_it_works.docx` (method).

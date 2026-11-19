@@ -4,7 +4,7 @@ Removes satellite trails from registered light frames by comparing each frame wi
 frames and subtracting only the trail. It runs on frames you open yourself, in batch, or as a step inside
 WeightedBatchPreprocessing (WBPP).
 
-SatelliteTrailRemover 2.9 · WBPP step 1.3 · Author: Erellaz · License: MIT
+SatelliteTrailRemover 3.0 · WBPP step 1.4 · Author: Erellaz · License: MIT
 
 ## Start here
 
@@ -22,9 +22,10 @@ installing the script, testing it on a few frames, and adding it to WBPP. Its la
 | `README_standalone.md` | The standalone script: modes, usage, limitations, version history. |
 | `README_WBPP.md` | The WBPP step: what it does, settings, speed and memory, reruns, limitations, verification. |
 | `SatelliteTrailRemover_how_it_works.docx` | Full description of the method, with equations, figures and validation; section 13 describes other satellite models for single images (ephemeris, star catalogue). |
-| `LICENSE` | MIT license. |
+| `LICENSE.txt` | MIT license. |
+| `CONTRIBUTING.md`, `tests/` | For developers: how the code is organised, the PixInsight rules it must follow, and the tests to run before submitting a change. Not needed to use the scripts. |
 
-The two scripts are a matched pair: use the WBPP step 1.3 with the standalone script 2.9.
+The two scripts are a matched pair: use the WBPP step 1.4 with the standalone script 3.0.
 
 ## Requirements
 

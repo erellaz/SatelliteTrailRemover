@@ -5,12 +5,15 @@ WBPP runs its standard light pipeline with one extra step per light group, after
 local normalization and integration. That step removes satellite trails from the registered frames, so local
 normalization and the master light are computed from cleaned frames.
 
-Version 1.3 · core: SatelliteTrailRemover 2.9 · Author: Erellaz · License: MIT
+Version 1.4 · core: SatelliteTrailRemover 3.0 · Author: Erellaz · License: MIT
 
 Run inside PixInsight 1.9.6 with WBPP 3.2.0 (its source files are labelled 3.1.2): version 1.2 in WBPP's automation
 mode on 12 real 100-Mpx frames and from the WBPP dialog on 213 frames in four filters, and version 1.3 from the WBPP
 dialog on the same 213 frames (see [Verified in PixInsight](#verified-in-pixinsight)). Also tested end to end in
 Node.js with mocks.
+
+Version 1.4 carries the SatelliteTrailRemover 3.0 core (wide trails). It passes the Node.js tests below, and its core
+was run on 212 real frames in a Node.js harness (see `README_standalone.md`), but 1.4 has not yet run inside PixInsight.
 
 ## What the step does
 
@@ -21,10 +24,12 @@ For each registered light group:
    data. Pixel rejection removes the trails, so this stack is trail-free. It is
    saved as `<output>/detrailed/<group>/STR_reference.xisf`.
 2. **Detection and removal.** Each registered frame is matched to the reference and searched for trails. This is the
-   method of SatelliteTrailRemover 2.9, unchanged:
+   method of SatelliteTrailRemover 3.0, unchanged:
    - adaptive match of the reference to the frame;
    - line and elongated-blob detection;
-   - along-track removal, including double or parallel trails.
+   - along-track removal, including double or parallel trails;
+   - wide trails: each line widened until its faint wings drop to the noise (option *Follow faint trail wings* of
+     the standalone script, on by default).
 3. **Hand-over to WBPP.** A frame with a trail gets a cleaned copy with the same file name in
    `<output>/detrailed/<group>/`, and WBPP continues with that copy. A frame without a trail is not written, and WBPP keeps
    using its registered file.
@@ -40,7 +45,7 @@ keywords (e.g. `WBPPWGHT`) and image properties are kept.
 
 The step cleans several frames at the same time, one frame per thread (PixInsight's `Thread` object, PJSR 1.9.6).
 The main thread reads each frame, shares its pixels and the reference's with a thread without copying them, and
-writes the result when the thread has finished. The cleaning code inside each thread is the same 2.9 core, so the
+writes the result when the thread has finished. The cleaning code inside each thread is the same core, so the
 result does not depend on the number of threads.
 
 `STRW_THREADS`, at the top of the file, sets how many frames are cleaned at once:
@@ -64,7 +69,9 @@ Threads: memory: 22.4 GB available, about 3.0 GB per frame, limited by memory
 Cleaning 37 frames, 5 at a time (one thread per frame; a frame's log appears when it is finished)
 ```
 
-The memory figure was measured in Node.js on the 2.9 core; inside PixInsight it has not been measured separately.
+The memory figure was measured in Node.js on the 2.9 core, and the 3.0 core needs the same peak (measured on a frame
+with two trails: 29.2 instead of 29.0 bytes per pixel on top of the frame and the reference). Inside PixInsight it has
+not been measured separately.
 
 Frame-parallel scaling of the 2.9 core was measured in Node.js (same V8 engine) on an i9-13900KS with 128 GB,
 on a real 11664×8750 frame. Every run gave the same modified pixels as the serial run.
@@ -77,7 +84,9 @@ on a real 11664×8750 frame. Every run gave the same modified pixels as the seri
 | 12 | 4.3 s | 7.8× |
 | 16 | 4.0 s | 8.3× |
 
-Beyond about 8 frames, memory bandwidth limits the gain. Inside PixInsight, reading and writing the frames stays on the
+Beyond about 8 frames, memory bandwidth limits the gain. With the 3.0 core and wide trails on, a frame with a trail
+takes about 50 % longer than with 2.9 (the match is fitted a second time without the trails); frames without a trail
+take the same time. Inside PixInsight, reading and writing the frames stays on the
 main thread and adds to these times. Measured inside WBPP on 12 frames: 29.1 s per frame one at a time, 6.3 s per
 frame with 8 threads (4.7×), with identical results (see [Verified in PixInsight](#verified-in-pixinsight)).
 
@@ -112,8 +121,9 @@ SatelliteTrailRemover):
 1. Open the script and set the parameters.
 2. Close it with OK or Cancel. Both save the settings.
 
-The WBPP step reads them each time it runs. Without saved settings it uses the 2.9 defaults. The console logs
-which ones were used.
+The WBPP step reads them each time it runs. Without saved settings it uses the 3.0 defaults. Settings saved by
+version 2.9 of the standalone script have no wide-trail entries, so the step uses the 3.0 default for those (*Follow
+faint trail wings* on, 120 px). The console logs which settings were used.
 
 Two options are always on in WBPP: trail detection, and *modify only detected trails*. Only frames with a
 detected trail are rewritten.
@@ -158,6 +168,9 @@ Results are kept in WBPP's execution cache, so **Purge cache** in WBPP clears th
 | WBPP's integration settings changed (rejection, weights, ...) | Nothing is processed again; only WBPP integrates again. |
 | `STRW_REF_REJECTION`, `STRW_REF_SIGMA_LOW` or `STRW_REF_SIGMA_HIGH` changed | The reference is integrated again and all frames are processed again. |
 | A frame was registered again, or frames were added | The reference is integrated again. Only the new or changed frames are processed. |
+
+After an update to version 1.4, the first run processes all frames again: the results of the 3.0 core differ from
+those of 2.9, so the cache of earlier versions is not reused.
 
 Frames processed in an earlier run are not reprocessed when frames are added to the group. The reference changes
 only slightly in that case.
@@ -238,7 +251,7 @@ for lights set to Winsorized 5.35 / 5.42:
 
 Notes for automation runs: WBPP's automation parameter `rejection_4` takes ImageIntegration's own constant
 (for example 8 for ESD, 3 for plain sigma clipping), not the numbering of WBPP's automation help. A new PixInsight instance has its own settings, so it does not see the settings saved by the
-standalone script in your usual instance, and uses the 2.9 defaults. In automation mode WBPP's cache is not kept between runs.
+standalone script in your usual instance, and uses the defaults of its core. In automation mode WBPP's cache is not kept between runs.
 
 ## Testing
 
@@ -277,7 +290,7 @@ It checks:
 
 The test does not exercise PixInsight's own ImageIntegration, file I/O, `Thread` or the WBPP GUI. Its threads run one
 after another, so it does not measure speed. The PixInsight runs described above cover that side, including runs from
-the WBPP dialog.
+the WBPP dialog (version 1.3; version 1.4 has not yet run inside PixInsight).
 
 ## License
 

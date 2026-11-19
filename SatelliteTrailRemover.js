@@ -34,9 +34,16 @@
 // up to 60 px.  Before, the outer flank of the second component was left in the frame.
 // The along-track model is 0 in distance bins without significant mean trail signal
 // (removes a small over-subtraction from clamping noise at 0).
+// v3.0: wide trails (option "Follow faint trail wings", on by default).  Bright trails
+// have faint wings far wider than their core; each detected line is now widened until
+// its mean profile drops to the noise (up to "Max wing width", 120 px), the gain/offset
+// match is re-fitted with the trails excluded (the first fit absorbed part of the wings),
+// and the along-track model is protected against stars at its edges (one-sided margin
+// level repaired from its own running median; outer bins held to the line's mean
+// profile; other detected lines excluded).  Off = v2.9 results, bit for bit.
 // Interactive mode modifies the selected views in place, with undo.
 //
-// Version 2.9
+// Version 3.0
 // Author: Erellaz
 // License: MIT (see the LICENSE file next to this script)
 // Documentation: SatelliteTrailRemover_how_it_works.docx (next to this file)
@@ -60,7 +67,7 @@
 #include <pjsr/StdIcon.jsh>
 #include <pjsr/StdButton.jsh>
 
-#define STR_VERSION   "2.9"
+#define STR_VERSION   "3.0"
 
 // ============================================================================
 // ==== CORE BEGIN
@@ -255,7 +262,7 @@ function STR_maxFilter(src, W, H, r) {
 // Returns {diff (Float32Array, 0 on invalid pixels), gainGrid, offsetGrid,
 //          BW, BH, blockSize, sigma}
 // ---------------------------------------------------------------------------
-function STR_adaptiveSubtract(sub, stack, valid, W, H, P, log) {
+function STR_adaptiveSubtract(sub, stack, valid, W, H, P, log, excl0) {
    var blockSize = Math.round(STR_num(P.blockSize, 64));
    var halfWin   = Math.round(STR_num(P.halfWin, 4));      // in blocks
    var clipSigma = STR_num(P.clipSigma, 3.0);
@@ -292,6 +299,7 @@ function STR_adaptiveSubtract(sub, stack, valid, W, H, P, log) {
                for (px = x0; px < x1; px++, idx++) {
                   if (!valid[idx]) continue;
                   if (excl && excl[idx]) continue;
+                  if (excl0 && excl0[idx]) continue;   // 3.0: detected trails (re-fit)
                   s = sub[idx]; r = stack[idx];
                   bS[bi] += s; bR[bi] += r; bSR[bi] += s * r; bRR[bi] += r * r; bN[bi] += 1;
                }
@@ -677,6 +685,30 @@ var STR_DET_DTHETA = 0.2;    // Radon angle step (degrees)
 var STR_DET_MINLEN = 60;     // minimum line length in binned px (~1000 px)
 var STR_DET_MAXLINES = 8;
 
+// Running median of a (Float64Array, length n) over +-half samples, evaluated every
+// max(1, half/8) samples and linearly interpolated (3.0, robust pedestal).
+function STR_runMedian(a, n, half) {
+   var st = Math.max(1, Math.floor(half / 8)), nk = Math.floor((n - 1) / st) + 1, k, i, j, lo, hi, buf;
+   var knot = new Float64Array(nk + 1), pos = new Float64Array(nk + 1);
+   for (k = 0; k < nk; k++) {
+      i = k * st; lo = Math.max(0, i - half); hi = Math.min(n - 1, i + half); buf = [];
+      for (j = lo; j <= hi; j++) buf.push(a[j]);
+      knot[k] = STR_median(buf); pos[k] = i;
+   }
+   if (pos[nk - 1] < n - 1) {
+      i = n - 1; lo = Math.max(0, i - half); buf = [];
+      for (j = lo; j <= i; j++) buf.push(a[j]);
+      knot[nk] = STR_median(buf); pos[nk] = i; nk++;
+   }
+   var out = new Float64Array(n);
+   for (k = 0; k < nk - 1; k++) {
+      for (i = pos[k]; i < pos[k + 1]; i++) out[i] = knot[k] + (knot[k + 1] - knot[k]) * (i - pos[k]) / (pos[k + 1] - pos[k]);
+   }
+   out[n - 1] = knot[nk - 1];
+   if (nk === 1) for (i = 0; i < n; i++) out[i] = knot[0];
+   return out;
+}
+
 function STR_median(arr) {   // plain Array, sorted in place
    var n = arr.length;
    if (n === 0) return 0;
@@ -853,7 +885,7 @@ function STR_corridor(L, a0, a1, hw, W, H, fn) {
 // linear fit -> corrected position/direction.  Then the mean cross-profile
 // gives the corridor half-width L.hw.  incl: Uint8Array (usable pixels).
 // ---------------------------------------------------------------------------
-function STR_refineLine(L, diff, incl, W, H, sigma) {
+function STR_refineLine(L, diff, incl, W, H, sigma, opt) {
    var dmax = 48, nd = 2 * dmax + 1, it, segs = [512, 1024, 2048, 4096], isg = 0, nOk = 0;
    L.nSeg = 0; L.segLen = 0;
    for (it = 0; it < 6 && isg < segs.length; it++) {
@@ -983,7 +1015,8 @@ function STR_refineLine(L, diff, incl, W, H, sigma) {
       }
    }
    for (i = lo; i <= hi; i++) if (ps[i] > peak) peak = ps[i];
-   // wings of bright trails: extend while above 2 % of the peak (at most 15 px per side)
+   // wings of bright trails: extend while above 2 % of the peak (at most 15 px per side).
+   // 3.0: with wingMode "noise" this is only provisional; STR_extendWings follows the wings further.
    var wThr = Math.max(0.02 * peak, 3 * nz), ext;
    for (ext = 0; ext < 15 && lo > 0 && ps[lo - 1] > wThr; ext++) lo--;
    for (ext = 0; ext < 15 && hi < nW - 1 && ps[hi + 1] > wThr; ext++) hi++;
@@ -998,6 +1031,52 @@ function STR_refineLine(L, diff, incl, W, H, sigma) {
 }
 
 // ---------------------------------------------------------------------------
+// 3.0 "noise" wings.  The mean profile over the whole line has a tiny noise (sigma / sqrt(n)), so the
+// PSF wings of a bright trail are measurable far below the 2 %-of-peak rule of STR_refineLine.  Wide
+// profile (+-dX px) of the residual, baseline = its median beyond 100 px, 5-bin smoothing; from the current
+// extent (+-(hw - 3)), each side is extended while the profile stays above 3 x its noise, at most
+// wingMax px.  The line is re-centred on the new extent.  Call it on the residual of the re-fitted
+// match: the first fit's offset is raised by the trail and hides the outer wings.
+// ---------------------------------------------------------------------------
+function STR_extendWings(L, diff, incl, W, H, sigma, wingMax) {
+   if (L.hwCore === undefined) L.hwCore = L.hw;
+   var dX = wingMax + 80, nX = 2 * dX + 1, i, ext, k5, s5, c5;
+   var PX = new Float64Array(nX), CX = new Float64Array(nX);
+   STR_corridor(L, L.a0, L.a1, dX + 0.49, W, H, function(idx, a, d) {
+      if (!incl[idx]) return;
+      var di = Math.round(d) + dX; if (di < 0 || di >= nX) return;
+      var vv = diff[idx]; if (vv > 50 * sigma) vv = 50 * sigma; else if (vv < -5 * sigma) vv = -5 * sigma;
+      PX[di] += vv; CX[di] += 1;
+   });
+   // baseline: median of the profile over 100 px <= |d| <= dX (robust to another feature in the band)
+   var totX = 0, pX = new Float64Array(nX), sX = new Float64Array(nX), far = [];
+   for (i = 0; i < nX; i++) {
+      pX[i] = CX[i] > 0 ? PX[i] / CX[i] : 0; totX += CX[i];
+      if (Math.abs(i - dX) >= 100 && CX[i] > 0) far.push(pX[i]);
+   }
+   var bX = far.length > 0 ? STR_median(far) : 0;
+   for (i = 0; i < nX; i++) {
+      s5 = 0; c5 = 0;
+      for (k5 = Math.max(0, i - 2); k5 <= Math.min(nX - 1, i + 2); k5++) { s5 += pX[k5] - bX; c5++; }
+      sX[i] = s5 / c5;
+   }
+   var nzX = sigma / Math.sqrt(Math.max(1, 5 * totX / nX)), xThr = 3 * nzX;
+   var h0 = Math.max(1, L.hw - 3), loX = dX - h0, hiX = dX + h0;
+   for (ext = 0; ext < wingMax && loX > 0 && sX[loX - 1] > xThr; ext++) loX--;
+   for (ext = 0; ext < wingMax && hiX < nX - 1 && sX[hiX + 1] > xThr; ext++) hiX++;
+   var dL = loX - dX, dR = hiX - dX, cOff = 0.5 * (dL + dR), hw = Math.ceil(0.5 * (dR - dL)) + 3;
+   if (Math.abs(cOff) >= 1) {
+      L.px += cOff * L.nx; L.py += cOff * L.ny;
+      STR_chord(L, W, H);
+      L.shift = (L.shift || 0) + cOff;
+   }
+   L.wingShift = (L.wingShift || 0) + (Math.abs(cOff) >= 1 ? cOff : 0);
+   if (hw > wingMax + 40) hw = wingMax + 40;
+   if (hw > L.hw) L.hw = hw;
+   L.wingNoise = nzX; L.wingL = dL; L.wingR = dR;
+}
+
+// ---------------------------------------------------------------------------
 // Along-track trail model T(a, d) inside the corridor of line L (estimated
 // over the corridor + 8 px margin, minus the margin level = pedestal): mean residual
 // of included pixels in 1-px along-track bins and 1-px distance bins, box-
@@ -1007,17 +1086,19 @@ function STR_refineLine(L, diff, incl, W, H, sigma) {
 // weight (removed = w*r + (1-w)*T); corridor pixels are marked in corr.
 // Returns the number of newly marked corridor pixels.
 // ---------------------------------------------------------------------------
-function STR_lineModel(L, diff, incl, W, H, sigma, Lw, lineT, w, sp, corr) {
+function STR_lineModel(L, diff, incl, W, H, sigma, Lw, lineT, w, sp, corr, opt) {
    var hwT = L.hw, mg = 8, hw = hwT + mg, nd = 2 * hw + 1, a0 = L.a0, La = Math.floor(L.a1 - a0) + 1;
    var S = new Float64Array(La * nd), C = new Float64Array(La * nd);
-   var T0 = null, T = null, pass, rej = 4 * sigma;
-   function boxAlong() {
+   var T0 = null, T = null, pass, rej = 4 * sigma, Cb = null;
+   function boxAlong(wantC) {
       var out = new Float32Array(La * nd), di, ai, s, c, add, rem;
+      if (wantC) Cb = new Float32Array(La * nd);
       for (di = 0; di < nd; di++) {
          s = 0; c = 0;
          for (ai = 0; ai <= Lw && ai < La; ai++) { s += S[ai * nd + di]; c += C[ai * nd + di]; }
          for (ai = 0; ai < La; ai++) {
             out[ai * nd + di] = (c >= 3) ? s / c : 0;
+            if (wantC) Cb[ai * nd + di] = c;
             add = ai + Lw + 1; rem = ai - Lw;
             if (add < La) { s += S[add * nd + di]; c += C[add * nd + di]; }
             if (rem >= 0) { s -= S[rem * nd + di]; c -= C[rem * nd + di]; }
@@ -1035,7 +1116,7 @@ function STR_lineModel(L, diff, incl, W, H, sigma, Lw, lineT, w, sp, corr) {
          if (T0 !== null) { var e = vv - T0[ai * nd + di]; if (e > rej || e < -rej) return; }
          S[ai * nd + di] += vv; C[ai * nd + di] += 1;
       });
-      if (pass === 0) T0 = boxAlong(); else T = boxAlong();
+      if (pass === 0) T0 = boxAlong(false); else T = boxAlong(opt && opt.wingGuard);
    }
    // Distance bins where the line's mean profile (whole length) is not significant carry no
    // trail: their model is set to 0 (v2.9).  Clamping noise at 0 there would subtract
@@ -1054,15 +1135,79 @@ function STR_lineModel(L, diff, incl, W, H, sigma, Lw, lineT, w, sp, corr) {
    // Pedestal: mean of the outer margin bins (hwT < |d| <= hw) at each along-track
    // position; only the trail profile above it is removed (no smooth residual
    // structure such as nebula mismatch is subtracted).
-   var ai2, di2, pb, pc;
+   // 3.0 (opt.robustPedestal): each side's margin level is compared with its own along-track
+   // running median (+-4 Lw).  Where the two sides depart differently, the side departing by more
+   // than its noise is contaminated (a star's mismatch ring falling in the margin made the mean
+   // pedestal 3 sigma low over the +-Lw window, i.e. +3 sigma of model on both sides of the
+   // trail: a black spot) and is replaced by its running median.
+   var ai2, di2, pb, pc, pedA = null;
+   if (opt && opt.robustPedestal) {
+      var pL = new Float64Array(La), pR = new Float64Array(La);
+      for (ai2 = 0; ai2 < La; ai2++) {
+         pb = 0; pc = 0;
+         for (di2 = 0; di2 < mg; di2++) { pb += T[ai2 * nd + di2]; pc += T[ai2 * nd + nd - 1 - di2]; }
+         pL[ai2] = pb / mg; pR[ai2] = pc / mg;
+      }
+      var mL = STR_runMedian(pL, La, 4 * Lw), mR = STR_runMedian(pR, La, 4 * Lw);
+      var pTol = 4 * sigma / Math.sqrt(mg * (2 * Lw + 1)) + 0.05 * sigma, okL, okR, nBad = 0;
+      pedA = new Float64Array(La);
+      // Only a departure on ONE side is a contamination: a feature crossing the whole corridor
+      // (another trail, a galaxy arm) raises both margins and is correctly cancelled by the mean.
+      var eL, eR;
+      for (ai2 = 0; ai2 < La; ai2++) {
+         eL = pL[ai2] - mL[ai2]; eR = pR[ai2] - mR[ai2];
+         var vl = pL[ai2], vr = pR[ai2];
+         if (Math.abs(eL - eR) > 1.41 * pTol) {
+            okL = Math.abs(eL) <= pTol; okR = Math.abs(eR) <= pTol;
+            if (!okL) vl = mL[ai2];
+            if (!okR) vr = mR[ai2];
+            if (!okL || !okR) nBad++;
+         }
+         pedA[ai2] = 0.5 * (vl + vr);
+      }
+      L.pedReplaced = nBad;
+   }
    for (ai2 = 0; ai2 < La; ai2++) {
-      pb = 0; pc = 0;
-      for (di2 = 0; di2 < mg; di2++) { pb += T[ai2 * nd + di2] + T[ai2 * nd + nd - 1 - di2]; pc += 2; }
-      pb /= pc;
+      if (pedA !== null) pb = pedA[ai2];
+      else {
+         pb = 0; pc = 0;
+         for (di2 = 0; di2 < mg; di2++) { pb += T[ai2 * nd + di2] + T[ai2 * nd + nd - 1 - di2]; pc += 2; }
+         pb /= pc;
+      }
       for (di2 = 0; di2 < nd; di2++) {
          var tv = T[ai2 * nd + di2] - pb;
          T[ai2 * nd + di2] = (tv > 0 && sig_d[di2]) ? tv : 0;   // a trail only adds light
       }
+   }
+   // 3.0 (opt.wingGuard): outside the core (|d| > L.hwCore, the width before the wing extension)
+   // the model is held to the trail's own shape: E(a, d) = A(a) g(d), g = the line's whole-length
+   // mean profile above its margin, A(a) = least-squares amplitude of the local core on g.  T may
+   // exceed E by at most 3 x its bin noise + 25 % of E (it is only lowered, never raised: raising it
+   // would over-subtract where the real wing is fainter than the mean shape).  A star's mismatch
+   // ring in a few wing bins was otherwise spread over +-Lw along the track (thin dark streaks
+   // beside bright stars).  The core zone stays centred on the core: the wing extension re-centres
+   // the line on its wings (by L.wingShift), the core is then at d = -L.wingShift.
+   var hc = (opt && opt.wingGuard && L.hwCore !== undefined) ? L.hwCore : -1;
+   var cC = hw - Math.round(L.wingShift || 0), cLo = Math.max(0, cC - hc), cHi = Math.min(nd - 1, cC + hc);
+   if (hc >= 0 && hc < hwT && Cb !== null) {
+      var gpr = new Float64Array(nd), sgg = 0, nG = 0;
+      for (dj = 0; dj < nd; dj++) {
+         gpr[dj] = sig_d[dj] ? Math.max(0, gm[dj] - gp) : 0;
+         if (dj >= cLo && dj <= cHi) sgg += gpr[dj] * gpr[dj];
+      }
+      if (sgg > 0) {
+         for (ai2 = 0; ai2 < La; ai2++) {
+            var sgt = 0, Aa, base = ai2 * nd;
+            for (dj = cLo; dj <= cHi; dj++) sgt += gpr[dj] * T[base + dj];
+            Aa = sgt > 0 ? sgt / sgg : 0;
+            for (dj = 0; dj < nd; dj++) {
+               if (dj >= cLo && dj <= cHi) continue;
+               var Ev = Aa * gpr[dj], tl = 3 * sigma / Math.sqrt(Math.max(1, Cb[base + dj])) + 0.25 * Ev;
+               if (T[base + dj] > Ev + tl) { T[base + dj] = Ev + tl; nG++; }
+            }
+         }
+      }
+      L.wingGuarded = nG;
    }
    var n = 0;
    STR_corridor(L, a0, L.a1, hwT + 0.49, W, H, function(idx, a, d) {
@@ -1144,7 +1289,7 @@ function STR_elongatedBlobs(w, W, H, minLen, minAspect) {
 // Returns {hasTrail, lines, blobs, lineT (Float32Array or null: (1-w)*T),
 //          region (Float32Array or null: dilated blob regions + corridors), nCorr}
 // ---------------------------------------------------------------------------
-function STR_detectTrails(sub, stack, diff, valid, w, sp, W, H, P, sigma, log, dump) {
+function STR_detectTrails(sub, stack, diff, valid, w, sp, W, H, P, sigma, log, dump, refit) {
    var N = W * H, t0 = Date.now(), i;
    var zThr   = STR_num(P.detectZ, 15);
    var minLen = STR_num(P.blobMinLen, 300), minAsp = STR_num(P.blobMinAspect, 10);
@@ -1174,10 +1319,52 @@ function STR_detectTrails(sub, stack, diff, valid, w, sp, W, H, P, sigma, log, d
          incl[i] = (valid[i] && !(sp && sp[i] > 0) && (stack[i] - hp[i]) <= thr) ? 1 : 0;
       }
       hp = null;
-      for (i = 0; i < lines.length; i++) STR_refineLine(lines[i], diff, incl, W, H, sigma);
+      for (i = 0; i < lines.length; i++) STR_refineLine(lines[i], diff, incl, W, H, sigma, null);
+   }
+   // 3.0: re-fit the gain/offset match with the trails excluded.  The first fit sees the trail
+   // wings (below the 3-sigma clip) and raises the offset of every window the trail crosses,
+   // so the replaced core (w = 1 -> gain*stack + offset) stayed slightly bright.
+   var newDiff = null;
+   if (refit && (lines.length > 0 || blobs.length > 0)) {
+      var ex = new Float32Array(N), xmg = 48;   // provisional corridor + the outer wings
+      for (i = 0; i < lines.length; i++) {
+         STR_corridor(lines[i], lines[i].a0, lines[i].a1, lines[i].hw + xmg + 0.49, W, H, function(idx) { ex[idx] = 1; });
+      }
+      if (region !== null) for (i = 0; i < N; i++) if (region[i] > 0) ex[i] = 1;
+      ex = STR_maxFilter(ex, W, H, 8);
+      var exu = new Uint8Array(N), nEx = 0;
+      for (i = 0; i < N; i++) if (ex[i] > 0) { exu[i] = 1; nEx++; }
+      ex = null;
+      if (log) log("Re-fitting the adaptive match with " + nEx + " trail px excluded");
+      newDiff = refit(exu);
+      exu = null;
+      diff = newDiff;
+   }
+   if (lines.length > 0 && P.wingMode === "noise") {
+      var wingMax = Math.round(STR_num(P.wingMax, 120));
+      for (i = 0; i < lines.length; i++) STR_extendWings(lines[i], diff, incl, W, H, sigma, wingMax);
+   }
+   if (lines.length > 0) {
       if (P.lineRemoval !== false) {
-         lineT = new Float32Array(N); corr = new Uint8Array(N);
-         for (i = 0; i < lines.length; i++) nCorr += STR_lineModel(lines[i], diff, incl, W, H, sigma, Lw, lineT, w, sp, corr);
+         corr = new Uint8Array(N);
+         lineT = new Float32Array(N);
+         var lopt = { robustPedestal: P.robustPedestal === true, wingGuard: P.wingGuard === true };
+         // 3.0 (robustPedestal): the other detected lines are excluded from each line's model
+         // (a crossing trail entered the margins at different along-track positions on the two
+         // sides and the wing bins; each line's own model removes it)
+         var inclX = null, setOff = function(idx) { inclX[idx] = 0; };
+         for (i = 0; i < lines.length; i++) {
+            var inc_i = incl;
+            if (lopt.robustPedestal && lines.length > 1) {
+               inclX = new Uint8Array(incl);
+               for (var o = 0; o < lines.length; o++) {
+                  if (o !== i) STR_corridor(lines[o], lines[o].a0, lines[o].a1, lines[o].hw + 8.49, W, H, setOff);
+               }
+               inc_i = inclX;
+            }
+            nCorr += STR_lineModel(lines[i], diff, inc_i, W, H, sigma, Lw, lineT, w, sp, corr, lopt);
+            inclX = null;
+         }
       }
       incl = null;
    }
@@ -1199,7 +1386,9 @@ function STR_detectTrails(sub, stack, diff, valid, w, sp, W, H, P, sigma, log, d
             + Math.round(L.py + L.a1 * L.uy) + "), half-width " + L.hw + " px, peak "
             + (L.peak / sigma).toFixed(2) + " sigma/px, refined on " + L.nSeg + " x " + L.segLen + " px"
             + (L.nComp > 1 ? ", " + L.nComp + " parallel components" : "")
-            + (Math.abs(L.shift) >= 1 ? ", re-centred by " + L.shift.toFixed(1) + " px" : ""));
+            + (Math.abs(L.shift) >= 1 ? ", re-centred by " + L.shift.toFixed(1) + " px" : "")
+            + (L.pedReplaced ? ", one-sided pedestal fixed at " + L.pedReplaced + " px" : "")
+            + (L.wingGuarded ? ", wing model held to the profile in " + L.wingGuarded + " bins" : ""));
       }
       for (i = 0; i < blobs.length; i++) {
          log("  blob " + (i + 1) + ": length " + Math.round(blobs[i].len) + " px, width "
@@ -1215,7 +1404,8 @@ function STR_detectTrails(sub, stack, diff, valid, w, sp, W, H, P, sigma, log, d
                       y1: L.py + L.a1 * L.uy, hw: L.hw, peakSigma: L.peak / sigma, nComp: L.nComp || 1 });
    }
    for (i = 0; i < blobs.length; i++) outBlobs.push({ len: blobs[i].len, wid: blobs[i].wid, cx: blobs[i].cx, cy: blobs[i].cy });
-   return { hasTrail: hasTrail, lines: outLines, blobs: outBlobs, lineT: lineT, region: region, nCorr: nCorr };
+   return { hasTrail: hasTrail, lines: outLines, blobs: outBlobs, lineT: lineT, region: region, nCorr: nCorr,
+            diff: newDiff };
 }
 
 // ---------------------------------------------------------------------------
@@ -1226,8 +1416,24 @@ function STR_detectTrails(sub, stack, diff, valid, w, sp, W, H, P, sigma, log, d
 // ---------------------------------------------------------------------------
 // `dump` (optional): function(name, fullFrameArray) called with intermediate
 // images, read-only (debugging; does not change the result).
+// 3.0: P.wideTrails switches on the wide-trail removal as one option: wings followed down to the
+// noise (wingMode "noise", up to P.wingMax px), adaptive match re-fitted with the trails excluded,
+// one-sided pedestal repair and the wing guard of STR_lineModel.  Each of the four can still be
+// set on its own (an explicit value wins).  Returns P itself when the option is off.
+function STR_trailOptions(P) {
+   if (P.wideTrails !== true) return P;
+   var Q = {}, k;
+   for (k in P) if (P.hasOwnProperty(k)) Q[k] = P[k];
+   if (Q.wingMode === undefined) Q.wingMode = "noise";
+   if (Q.refitOffset === undefined) Q.refitOffset = true;
+   if (Q.robustPedestal === undefined) Q.robustPedestal = true;
+   if (Q.wingGuard === undefined) Q.wingGuard = true;
+   return Q;
+}
+
 function STR_processChannel(sub, stack, W, H, P, log, dump) {
    var N = W * H;
+   P = STR_trailOptions(P);
    if (dump) { dump("sub_in", sub); dump("stack_in", stack); }
    var vm = STR_validMask(sub, stack, N);
    if (log) log("Valid pixels: " + vm.count + " / " + N
@@ -1262,8 +1468,12 @@ function STR_processChannel(sub, stack, W, H, P, log, dump) {
    // Frame-level trail detection, line removal, restriction (v2.6)
    var det = null, lineT = null, i;
    if (P.detectEnable === true) {
+      var refit = (P.refitOffset === true) ? function(ex) {
+         return STR_adaptiveSubtract(sub, stack, vm.mask, W, H, P, log, ex).diff;
+      } : null;
       det = STR_detectTrails(sub, stack, diff, vm.mask, w, (typeof sp !== "undefined") ? sp : null,
-                             W, H, P, as.sigma, log, dump);
+                             W, H, P, as.sigma, log, dump, refit);
+      if (det.diff) diff = det.diff;
       lineT = det.lineT;
       if (P.restrictToTrails !== false) {
          var reg = det.region;
@@ -1339,6 +1549,9 @@ var STR_defaults = {
    lineRemoval:      true,
    alongWin:         64,
    restrictToTrails: true,
+   // Wide trails: faint wings followed down to the noise (3.0)
+   wideTrails:       true,
+   wingMax:          120,
    // Outputs
    wantDiff:      false,
    wantWeight:    true,
@@ -1362,10 +1575,11 @@ var STR_numKeys = [
    "blockSize", "halfWin", "tau", "clipSigma", "clipIter",
    "smoothRadius", "sigmaLow", "sigmaHigh", "structTol", "brightTol", "growRadius", "featherRadius",
    "detectZ", "blobMinLen", "blobMinAspect", "alongWin",
-   "satLevel", "satGrow"
+   "satLevel", "satGrow", "wingMax"
 ];
 var STR_boolKeys = ["scaledPrior", "satGuard", "wantDiff", "wantWeight", "wantRemoved", "wantGainMap",
-                    "dumpEnable", "detectEnable", "lineRemoval", "restrictToTrails", "wbppEnable"];
+                    "dumpEnable", "detectEnable", "lineRemoval", "restrictToTrails", "wbppEnable",
+                    "wideTrails"];
 var STR_strKeys  = ["batchDir", "batchSuffix", "dumpDir", "wbppDir", "uiExpanded"];
 
 function STR_loadSettings(P) {
@@ -1514,7 +1728,8 @@ function STR_writeHistory(view, P, st) {
       + " smooth=" + P.smoothRadius + " ramp=" + P.sigmaLow + "-" + P.sigmaHigh
       + " struct=" + P.structTol + " bright=" + P.brightTol + " grow=" + P.growRadius + " feather=" + P.featherRadius
       + (P.detectEnable ? " detect=z" + P.detectZ + "/blob" + P.blobMinLen + "x" + P.blobMinAspect
-         + (P.lineRemoval ? "/lines" + P.alongWin : "") + (P.restrictToTrails ? "/restrict" : "") : "")
+         + (P.lineRemoval ? "/lines" + P.alongWin : "") + (P.wideTrails ? "/wings" + P.wingMax : "")
+         + (P.restrictToTrails ? "/restrict" : "") : "")
       + (st.detected ? " trail=" + (st.hasTrail ? "yes" : "no") + "(" + st.nLines + "L," + st.nBlobs + "B)" : "")
       + " touched=" + st.nAny + "px";
    var keywords = view.window.keywords, kept = [], i;
@@ -2129,6 +2344,15 @@ function STR_Dialog() {
    this.alongWinCtrl = numCtrl(this.detectGroup, "Along-track half window (px):", 8, 512, 0, 504,
       "Averaging length along the trail. Smaller follows brightness changes (flares) better, "
       + "larger is less noisy.");
+   this.wideTrailsCheck = new CheckBox(this.detectGroup);
+   this.wideTrailsCheck.text = "Follow faint trail wings (wide trails)";
+   this.wideTrailsCheck.toolTip = "Bright trails have faint wings far wider than their core. On: each "
+      + "detected line is widened until its profile drops to the noise, the match to the stack is "
+      + "re-fitted with the trails excluded, and the trail model is protected against stars at its "
+      + "edges. Off = v2.9 widths.";
+   this.wingMaxCtrl = numCtrl(this.detectGroup, "Max wing width (px):", 20, 400, 0, 380,
+      "Largest half-width a line may be widened to, beyond its detected core.");
+   this.wideTrailsCheck.onCheck = function(checked) { d.wingMaxCtrl.enabled = checked; };
    this.restrictCheck = new CheckBox(this.detectGroup);
    this.restrictCheck.text = "Only modify detected trails (frames without trail are left untouched)";
    this.restrictCheck.toolTip = "Off: the per-pixel correction also applies elsewhere (hot pixels, "
@@ -2142,6 +2366,8 @@ function STR_Dialog() {
    this.detectGroup.sizer.add(this.blobMinAspectCtrl);
    this.detectGroup.sizer.add(this.lineRemovalCheck);
    this.detectGroup.sizer.add(this.alongWinCtrl);
+   this.detectGroup.sizer.add(this.wideTrailsCheck);
+   this.detectGroup.sizer.add(this.wingMaxCtrl);
    this.detectGroup.sizer.add(this.restrictCheck);
 
    // ---- Diagnostic outputs ----
@@ -2313,6 +2539,9 @@ function STR_Dialog() {
       d.blobMinAspectCtrl.setValue(P.blobMinAspect);
       d.lineRemovalCheck.checked = P.lineRemoval;
       d.alongWinCtrl.setValue(P.alongWin);
+      d.wideTrailsCheck.checked = P.wideTrails;
+      d.wingMaxCtrl.setValue(P.wingMax);
+      d.wingMaxCtrl.enabled = P.wideTrails;
       d.restrictCheck.checked = P.restrictToTrails;
       d.detectCheck.checked = P.detectEnable;
       d.detectCheck.onCheck(P.detectEnable);
@@ -2352,6 +2581,8 @@ function STR_Dialog() {
       P.blobMinAspect = d.blobMinAspectCtrl.value;
       P.lineRemoval   = d.lineRemovalCheck.checked;
       P.alongWin      = Math.round(d.alongWinCtrl.value);
+      P.wideTrails    = d.wideTrailsCheck.checked;
+      P.wingMax       = Math.round(d.wingMaxCtrl.value);
       P.restrictToTrails = d.restrictCheck.checked;
       P.wantDiff      = d.wantDiffCheck.checked;
       P.wantWeight    = d.wantWeightCheck.checked;
