@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+PixInsight XML Code Signature Format - XSGN version 1.0
+Created with PixInsight software - https://pixinsight.com/
+-->
+<xsgn version="1.0" xmlns="http://www.pixinsight.com/xsgn" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.pixinsight.com/xsgn http://pixinsight.com/xsgn/xsgn-1.0.xsd">
+   <CreationTime>2026-11-19T01:46:06.034Z</CreationTime>
+   <Signature version="1.0" scriptId="TrailLabeler" developerId="BlackRig">
+      <Timestamp>2026-11-19T01:46:06.034Z</Timestamp>
+      <CodeSignature encoding="Base64">O3SaxLWQSDxrm0bI/Xab8znhHDbEUrpKa2xJIo6Sv+4kE8hjUs1LeJIrmuAVrxTYvKGAOwSkLsYxr/Z65F06Aw==</CodeSignature>
+   </Signature>
+</xsgn>
