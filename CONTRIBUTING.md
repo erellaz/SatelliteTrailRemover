@@ -1,4 +1,4 @@
-# Contributing to SatelliteTrailRemover
+# Contributing to DebandDesat
 
 Thank you for considering a contribution. Bug reports, test data, fixes and new ideas are all welcome. This guide
 explains how the code is organised, the rules it must follow to run in PixInsight, how to test a change, and what
@@ -10,13 +10,18 @@ By contributing you agree that your contribution is released under the project's
 
 | File | Role |
 |---|---|
-| `SatelliteTrailRemover.js` | Standalone script (Script › BlackRig › SatelliteTrailRemover): dialog, interactive, batch and WBPP-folder modes. Saves its parameters in PixInsight's settings. |
-| `SatelliteTrailRemover.xsgn` | Code signature of the standalone script, produced by the maintainer. |
-| `SatelliteTrailRemover_WBPP.js` | WBPP step, loaded by WeightedBatchPreprocessing as its *pipeline builder*. Reads the parameters saved by the standalone script. |
-| `tests/test_builder.js` | End-to-end test of the WBPP step in Node.js (79 checks). |
-| `tests/check_core.js` | Checks that both scripts contain the same numerical core. |
-| `SatelliteTrailRemover_how_it_works.docx` | The method in full: equations, design choices, validation. Read it before changing the algorithm. |
-| `README_standalone.md`, `README_WBPP.md` | User documentation of the two scripts. |
+| `Desat.js` | Standalone script (Script › BlackRig › Desat): dialog, interactive, batch and WBPP-folder modes. Saves its parameters in PixInsight's settings. |
+| `Desat.xsgn` | Code signature of the standalone script, produced by the maintainer. |
+| `Desat_WBPP.js` | WBPP step, loaded by WeightedBatchPreprocessing as its *pipeline builder*. Reads the parameters saved by the standalone script. |
+| `Deband.js` | Standalone banding removal script (Script › BlackRig › Deband). Saves the parameters used by the deband step of `DebandDesat_WBPP.js`. Its own core (`FD_` functions, between the same markers). |
+| `DebandDesat_WBPP.js` | The WBPP builder with two steps: Deband before registration, and the trail step of `Desat_WBPP.js` after it. Built from that file (trail step, verbatim) and Deband 2.1's core (verbatim). |
+| `Deband_WBPP.js` | The WBPP builder with the deband step only. **Generated** from `DebandDesat_WBPP.js` by `tools/make_Deband_WBPP.py` (Python 3): never edit it by hand; run the tool after any change of `DebandDesat_WBPP.js`. |
+| `tests/test_builder.js` | End-to-end test of the WBPP trail step in Node.js (82 checks); runs on `Desat_WBPP.js` and on `DebandDesat_WBPP.js`. |
+| `tests/test_adaptivesubtraction.js` | Test suite of `AdaptiveSubtraction.js` (17 checks): use cases, star test, robust norms, masks, speed. Writes `results.json`, the source of every number in `AdaptiveSubtraction_how_it_works.docx`. |
+| `tests/test_debanddesat.js` | End-to-end test of the deband step of `DebandDesat_WBPP.js` (41 checks); also runs on `Deband_WBPP.js` (38 checks: no trail step). |
+| `tests/check_core.js` | Checks that a builder contains the same numerical core as the standalone script. |
+| `Desat_how_it_works.docx` | The method in full: equations, design choices, validation. Read it before changing the algorithm. |
+| `README_Desat.md`, `README_Desat_WBPP.md` | User documentation of the two scripts. |
 
 ### The numerical core
 
@@ -25,10 +30,15 @@ ECMAScript 5 on `Float32Array` data and uses no PixInsight objects, so it runs u
 point is `STR_processChannel(sub, stack, W, H, P, log, dump)`. It overwrites `sub` with the cleaned data.
 
 **Both scripts carry an identical copy of the core.** The WBPP step wraps it in `function STRW_core() { ... }` so
-that its source can be sent to worker threads. If you change the core, make the same change in both files and run:
+that its source can be sent to worker threads. If you change the core, make the same change in both files (and in
+`DebandDesat_WBPP.js`, which also holds Deband's core, wrapped in `FDW_core`) and run:
 
 ```
-node tests/check_core.js SatelliteTrailRemover.js SatelliteTrailRemover_WBPP.js
+node tests/check_core.js Desat.js Desat_WBPP.js
+node tests/check_core.js Desat.js DebandDesat_WBPP.js
+node tests/check_core.js Deband.js DebandDesat_WBPP.js
+python tools/make_Deband_WBPP.py
+node tests/check_core.js Deband.js Deband_WBPP.js
 ```
 
 ### Processing stages (in `STR_processChannel`)
@@ -64,12 +74,12 @@ PixInsight's JavaScript runtime (PJSR) has constraints that a normal JavaScript 
 
 ### Standalone script
 
-- The header must keep `#feature-id    SatelliteTrailRemover : BlackRig > SatelliteTrailRemover`. The part before
+- The header must keep `#feature-id    Desat : BlackRig > Desat`. The part before
   the colon is the script identifier: without it, code signing fails with "No script identifier has been
   specified".
 - In-place processing of a user's view uses `UndoFlag_DefaultMode` (so Undo works). `UndoFlag_NoSwapFile` is only
   for new or temporary windows and batch files.
-- Any change invalidates `SatelliteTrailRemover.xsgn`. Do not include a signature in your contribution: the
+- Any change invalidates `Desat.xsgn`. Do not include a signature in your contribution: the
   maintainer signs releases.
 
 ### WBPP step
@@ -99,15 +109,21 @@ You need Node.js (tested with 18.4) and, for the WBPP test, a PixInsight install
 `OperationQueue`, `ExecutionCache` and `BPPOperationBlock` sources from it.
 
 ```
-node tests/check_core.js SatelliteTrailRemover.js SatelliteTrailRemover_WBPP.js
-node --max-old-space-size=8000 tests/test_builder.js SatelliteTrailRemover_WBPP.js <empty work folder>
+node tests/check_core.js Desat.js Desat_WBPP.js
+node --max-old-space-size=8000 tests/test_builder.js Desat_WBPP.js <empty work folder>
+node --max-old-space-size=8000 tests/test_builder.js DebandDesat_WBPP.js <empty work folder>
+node --max-old-space-size=8000 tests/test_debanddesat.js DebandDesat_WBPP.js <empty work folder>
+node --max-old-space-size=8000 tests/test_debanddesat.js Deband_WBPP.js <empty work folder>
+node tests/test_adaptivesubtraction.js --out <folder>
 ```
 
-Both must end with `PASS cores identical` and `ALL PASSED`. If PixInsight is not installed in
+All must end with `PASS cores identical` and `ALL PASSED`. If PixInsight is not installed in
 `C:/Program Files/PixInsight`, set `WBPP_DIR` to `<PixInsight>/src/scripts/BatchPreprocessing`.
+`test_debanddesat.js` also needs Deband 2.1: it uses `FD_FILE` if set, else `Deband.js` in the builder's folder,
+else `../FourierDeband/Deband.js`.
 
 The WBPP test also exercises the core on synthetic frames with single and double trails: 90–96 % of the trail
-flux removed, and fewer than 0.1 % of trail-free pixels changed by more than 0.5 σ. `README_WBPP.md` (Testing)
+flux removed, and fewer than 0.1 % of trail-free pixels changed by more than 0.5 σ. `README_Desat_WBPP.md` (Testing)
 lists everything it checks. To syntax-check the standalone script outside PixInsight, strip its `#` lines and
 evaluate it with `new Function(source)`.
 
@@ -167,8 +183,8 @@ abandoned.
 2. Keep each pull request to one subject.
 3. Run the checks of [Rules the code must follow](#rules-the-code-must-follow) and both tests.
 4. Bump the version: `STR_VERSION` (`#define` in the standalone script, `var` in the WBPP step) for a core
-   change, `STRW_VERSION` for a WBPP-step change. Add a line to the Changelog in `README_standalone.md` or to the
-   version history in the header of `SatelliteTrailRemover_WBPP.js`, and update the manual if the method changes.
+   change, `STRW_VERSION` for a WBPP-step change. Add a line to the Changelog in `README_Desat.md` or to the
+   version history in the header of `Desat_WBPP.js`, and update the manual if the method changes.
 5. In the pull request, say what the change does and why, show the evidence (test output, real-data results as
    above), and state clearly what was verified where: Node.js tests, inside PixInsight, which data. Do not claim a
    test you did not run.

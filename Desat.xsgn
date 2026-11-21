@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+PixInsight XML Code Signature Format - XSGN version 1.0
+Created with PixInsight software - https://pixinsight.com/
+-->
+<xsgn version="1.0" xmlns="http://www.pixinsight.com/xsgn" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.pixinsight.com/xsgn http://pixinsight.com/xsgn/xsgn-1.0.xsd">
+   <CreationTime>2026-11-20T18:47:07.188Z</CreationTime>
+   <Signature version="1.0" scriptId="Desat" developerId="BlackRig">
+      <Timestamp>2026-11-20T18:47:07.188Z</Timestamp>
+      <CodeSignature encoding="Base64">bQpT2QwkUp+3w9Pho5Mb6HSnTRqj5yhMfqKSrn+lECduxjd82t7X7eQFQWjdlHtElFmhd96V1jEb+sfoFKGbCQ==</CodeSignature>
+   </Signature>
+</xsgn>

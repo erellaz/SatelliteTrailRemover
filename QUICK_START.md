@@ -1,24 +1,30 @@
-# SatelliteTrailRemover: quick start
+# Desat: quick start
 
 Removes satellite trails from your light frames, either on frames you open yourself or as a step inside
 WeightedBatchPreprocessing (WBPP). Author: Erellaz · License: MIT.
 
-The package contains two scripts that work together:
+The package contains the trail removal script and its WBPP step, the banding removal script and two WBPP steps that
+use it, and a checking tool:
 
 | File | What it is |
 |---|---|
-| `SatelliteTrailRemover.js` (3.0) | The standalone script. You use it to test on a few frames and to set the parameters. |
-| `SatelliteTrailRemover_WBPP.js` (1.4) | The WBPP step. It cleans every registered light frame during a WBPP run, with the parameters saved by the standalone script. |
+| `Desat.js` (3.0) | The standalone script. You use it to test on a few frames and to set the parameters. |
+| `Desat_WBPP.js` (1.4) | The WBPP step. It cleans every registered light frame during a WBPP run, with the parameters saved by the standalone script. |
+| `Deband.js` (2.1) | The banding removal script (Script › BlackRig › Deband). You use it to test on a few frames and to set the parameters of the deband step (section 6). |
+| `DebandDesat_WBPP.js` (1.0) | Alternative WBPP step: removes CMOS banding before registration, then the same trail removal after it (section 6). |
+| `Deband_WBPP.js` (1.0) | Alternative WBPP step: removes CMOS banding before registration, without trail removal (section 6). |
+| `TrailBlink.js` (1.2) | Optional checking tool (Script › BlackRig › TrailBlink): shows each frame before and after cleaning or debanding and records your verdicts. |
 
-Use the two versions together, as shipped.
+Use the versions together, as shipped.
 
 ## 1. Install the standalone script
 
-1. Copy both `.js` files into a folder of your own.
+1. Copy the `.js` files, with the `.xsgn` signature files next to them, into a folder of your own.
 2. In PixInsight: **Script › Feature Scripts…**, click **Add**, select that folder, then **Done**.
-3. The script appears as **Script › BlackRig › SatelliteTrailRemover**.
+3. The script appears as **Script › BlackRig › Desat**.
 
-The WBPP file does not appear in the Script menu. That is expected: WBPP loads it directly (step 3).
+The WBPP files (`Desat_WBPP.js`, `DebandDesat_WBPP.js`, `Deband_WBPP.js`) do not appear in the Script menu. That is expected:
+WBPP loads them directly (sections 3 and 6).
 
 ## 2. Test on a few frames
 
@@ -31,7 +37,7 @@ Start with a handful of frames that show trails, to see what the script does and
 
 **Steps:**
 1. Open the reference stack and two or three registered frames with visible trails.
-2. Run **Script › BlackRig › SatelliteTrailRemover**.
+2. Run **Script › BlackRig › Desat**.
 3. Choose the reference stack and select the frames.
 4. Open *Diagnostic Outputs* and tick **Removed component**.
 5. Click Execute.
@@ -53,7 +59,7 @@ The test frames you opened were modified in memory only. Close them without savi
 
 1. Open WBPP **in the same PixInsight instance** where you saved the parameters. Each PixInsight instance keeps its
    own settings.
-2. Open the **Pipeline** tab. Under **Pipeline builder**, enable it and select `SatelliteTrailRemover_WBPP.js`.
+2. Open the **Pipeline** tab. Under **Pipeline builder**, enable it and select `Desat_WBPP.js`.
 3. Check the pipeline panel: each light group now shows a **Satellite trail removal** step after *Registration*.
 4. Run WBPP as usual.
 
@@ -73,7 +79,7 @@ The test frames you opened were modified in memory only. Close them without savi
   - `Reference rejection: ...`
   - `Cleaning N frames, T at a time`
   - one line per frame (trail found or not);
-- `detrailed/<group>/SatelliteTrailRemover_report.csv`: one row per frame, with lines found, detection score and
+- `detrailed/<group>/Desat_report.csv`: one row per frame, with lines found, detection score and
   pixels modified;
 - a few cleaned frames next to their registered version.
 
@@ -82,7 +88,7 @@ high 3 to 5) and keep more faint signal.
 
 ## 4. Options in the WBPP script
 
-Edit these lines at the top of `SatelliteTrailRemover_WBPP.js` with any text editor. WBPP reads the file at each run;
+Edit these lines at the top of `Desat_WBPP.js` with any text editor. WBPP reads the file at each run;
 no reinstallation is needed.
 
 | Line | Default | Meaning |
@@ -113,7 +119,55 @@ WBPP's cache keeps the step's results, so a rerun skips what is already done.
 
 **Purge cache** in WBPP clears everything.
 
-## 6. Limitations
+## 6. Remove banding: DebandDesat_WBPP or Deband_WBPP
+
+CMOS sensors can add faint horizontal and vertical bands to every frame. They show most in short or under-exposed
+frames, and the part that repeats from frame to frame does not average out in the stack. `DebandDesat_WBPP.js` replaces
+`Desat_WBPP.js` as WBPP's pipeline builder: it adds a **Deband** step before registration, with the
+Deband method, and keeps the same **Satellite trail removal** step after registration. `Deband_WBPP.js` adds the
+same **Deband** step without trail removal, for banding only.
+
+> **Not yet run inside PixInsight.** DebandDesat_WBPP 1.0 and Deband_WBPP 1.0 were tested outside PixInsight, against WBPP's own pipeline code
+> with simulated PixInsight objects. Check the first run carefully (see below).
+
+**Set it up:**
+1. **Deband** is part of this package and is installed with the other scripts in section 1 (`Deband.js` and
+   `Deband.xsgn`). It appears as **Script › BlackRig › Deband**.
+2. Open a calibrated light frame (debayered, for a colour camera) and run Deband on it. Adjust the parameters
+   if needed, then close the dialog with **OK** or **Cancel**: both save the parameters, and both builders use them.
+   Without saved parameters, they use Deband's defaults.
+3. Open WBPP in the same PixInsight instance. In the **Pipeline** tab, under **Pipeline builder**, select
+   `DebandDesat_WBPP.js` (banding and trails) or `Deband_WBPP.js` (banding only) instead of `Desat_WBPP.js`
+   (WBPP takes one builder).
+4. For a colour camera, set WBPP's debayer output to **Combined RGB**. With separate RGB channels the frames are not
+   debanded; the Pipeline builder panel and the console say so.
+5. Check the pipeline panel: each light group shows a **Deband** step after calibration and before *Registration*
+   and, with DebandDesat_WBPP, the **Satellite trail removal** step after *Registration*. Run WBPP as usual.
+
+**What the deband step does:**
+- **Works along the sensor's rows and columns.** It runs on every light frame after calibration, cosmetic correction
+  and debayering, before registration rotates and shifts the frames.
+- **Writes a debanded copy** of each frame to `<output>/debanded/<group>/`. The rest of WBPP (measurement,
+  registration, local normalization, integration, drizzle) uses it. The calibrated frames are never modified.
+- **Keeps large structures.** Patterns longer than 128 px (Deband's *Keep structures larger than*) and the
+  background gradient are left alone.
+- **Disk and time.** One more copy of every light frame (about 400 MB per 100-megapixel monochrome frame). Measured
+  outside PixInsight, a 100-megapixel frame took about 40 s on one core and up to 3.4 GB of memory; frames are
+  debanded in parallel as far as memory allows.
+
+**After the run, check:**
+- `debanded/<group>/Deband_report.csv`: per frame, the RMS removed and its ratio to the group's median. The
+  console warns about frames above 2× the median.
+- a few frames in **TrailBlink** (**Script › BlackRig › TrailBlink**, mode **Deband QC**): each frame before
+  deband and debanded, side by side. Its *Detail* view (key 2) makes bands stand out.
+
+**Options and reruns:** lines at the top of `DebandDesat_WBPP.js`: `DD_DEBAND` and `DD_DETRAIL` (default `true`) turn each
+step on or off; `FDW_THREADS` (default `0`, automatic; also in `Deband_WBPP.js`) sets the number of frames debanded at the same
+time; the other lines are those of section 4. For banding only, select `Deband_WBPP.js` rather than set `DD_DETRAIL`
+to `false`: an update would replace the edited file. Changing a Deband parameter debands all frames again. Details:
+`README_DebandDesat_WBPP.md`.
+
+## 7. Limitations
 
 - **Drizzle:** drizzle integration reads the calibrated frames, which are not cleaned.
   - With drizzle on, frames with a cleaned trail are left out of the drizzle master. They are still in the normal
@@ -126,5 +180,6 @@ WBPP's cache keeps the step's results, so a rerun skips what is already done.
 - **Very faint or very short trails** can stay below the detection threshold (on a test set: full-length trails
   below about 0.1σ per pixel, or shorter than about 2000 px). Such faint trails mostly average out in the stack.
 
-Tested with PixInsight 1.9.6 and WBPP 3.2.0 on Windows. Details: `README_WBPP.md` (WBPP step), `README_standalone.md` (standalone script) and
-`SatelliteTrailRemover_how_it_works.docx` (method).
+Tested with PixInsight 1.9.6 and WBPP 3.2.0 on Windows (DebandDesat_WBPP and Deband_WBPP: not yet, see section 6). Details: `README_Desat_WBPP.md`
+(WBPP step), `README_Desat.md` (standalone script), `README_DebandDesat_WBPP.md` (DebandDesat_WBPP and Deband_WBPP), `README_TrailBlink.md`
+(TrailBlink) and `Desat_how_it_works.docx` (method).
